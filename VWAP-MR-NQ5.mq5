@@ -42,7 +42,7 @@ datetime m_lastBarTime      = 0;
 
 //--- Daily trade limiter
 bool     m_tradeTakenToday  = false;
-int      m_currentTradeDay  = -1;
+datetime m_currentDayD1     = 0;          // D1 bar open time – daily anchor (Bug 2 fix)
 
 //--- Position tracking & break-even
 bool     m_breakEvenDone    = false;
@@ -67,28 +67,35 @@ int OnInit()
    m_trade.SetDeviationInPoints(10);
    m_trade.SetTypeFilling(DetectFillingMode());
 
-   //--- Initialize day tracker
-   MqlDateTime dt;
-   TimeCurrent(dt);
-   m_currentTradeDay = dt.day_of_year;
+   //--- Bug 2 fix: anchor daily reset on D1 bar open (same source as VWAP)
+   m_currentDayD1 = iTime(_Symbol, PERIOD_D1, 0);
 
    //--- Recover state if a position from this EA is already open
-   if(FindOwnPosition())
+   bool positionOpen = FindOwnPosition();
+   if(positionOpen)
    {
       double tickSize = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
       if(MathAbs(m_initialSL - m_entryPrice) < tickSize * 2.0)
          m_breakEvenDone = true;
    }
 
-   //--- Check deal history to see if we already traded today
+   //--- Bug 3 fix: check deal history for a trade today.
+   //    Fallback: if a position is already open (e.g. backtesting init with empty history),
+   //    mark as traded regardless — prevents a double-entry on restart.
    m_tradeTakenToday = HasTradedToday();
+   if(!m_tradeTakenToday && positionOpen)
+   {
+      m_tradeTakenToday = true;
+      Print("[INIT] Position found but no history deal detected – setting tradeTakenToday=true as fallback.");
+   }
 
    //--- Draw persistent UI elements
    DrawRulesPanel();
    DrawHUD();
 
-   PrintFormat("VWAP-MR-NQ5 v1.10 | Magic %d | Risk %.1f%% | Broker GMT+%d | IT GMT+%d",
-               InpMagicNumber, InpRiskPercent, InpBrokerGMTOffset, InpItalianGMTOffset);
+   PrintFormat("VWAP-MR-NQ5 v1.11 | Magic %d | Risk %.1f%% | Broker GMT+%d | IT GMT+%d | D1=%s",
+               InpMagicNumber, InpRiskPercent, InpBrokerGMTOffset, InpItalianGMTOffset,
+               TimeToString(m_currentDayD1));
 
    return INIT_SUCCEEDED;
 }
@@ -111,47 +118,62 @@ void OnDeinit(const int reason)
 //+------------------------------------------------------------------+
 void OnTick()
 {
-   //--- 1) EOD Hard Close check (every tick) ─────────────────────
+   //--- 1) Detect position closed by SL/TP (Bug 1 fix) ───────────
+   //    If we tracked a ticket but FindOwnPosition() no longer finds it,
+   //    the position was closed by SL/TP or broker — clean up immediately.
    bool hasPosition = FindOwnPosition();
+   if(!hasPosition && m_posTicket != 0)
+   {
+      PrintFormat("[CLOSED] Position #%d closed by SL/TP/broker.", m_posTicket);
+      DeletePositionBoxes();
+      m_breakEvenDone = false;
+      m_entryPrice    = 0.0;
+      m_initialSL     = 0.0;
+      m_initialTP     = 0.0;
+      m_posTicket     = 0;
+      m_entryTime     = 0;
+   }
+
+   //--- 2) EOD Hard Close check (every tick) ─────────────────────
    if(hasPosition && IsPastSessionEnd())
    {
       ForceClosePosition();
       return;
    }
 
-   //--- 2) Break-even management (every tick) ────────────────────
+   //--- 3) Break-even management (every tick) ────────────────────
    if(hasPosition && !m_breakEvenDone)
       ManageBreakEven();
 
-   //--- 3) Update HUD (every tick when position open or on new bar)
+   //--- 4) Update HUD (every tick when position open or on new bar)
    bool newBar = IsNewBar();
    if(hasPosition || newBar)
       UpdateHUD();
 
-   //--- 4) Entry logic runs ONLY on the first tick of a new M5 bar
+   //--- 5) Entry logic runs ONLY on the first tick of a new M5 bar
    if(!newBar)
       return;
 
-   //--- 5) Daily reset (new calendar day → allow new trade)
+   //--- 6) Daily reset (new calendar day → allow new trade)
    CheckDailyReset();
 
-   //--- 6) Guard: already traded today?
+   //--- 7) Guard: already traded today?
    if(m_tradeTakenToday)
       return;
 
-   //--- 7) Guard: position still open?
+   //--- 8) Guard: position still open?
    if(FindOwnPosition())
       return;
 
-   //--- 8) Guard: within operational session window?
+   //--- 9) Guard: within operational session window?
    if(!IsInSession())
       return;
 
-   //--- 9) Calculate VWAP from daily anchor to Bar[1] / Bar[2]
+   //--- 10) Calculate VWAP from daily anchor to Bar[1] / Bar[2]
    if(!CalculateVWAP())
       return;
 
-   //--- 10) Evaluate entry signal and execute if valid
+   //--- 11) Evaluate entry signal and execute if valid
    EvaluateEntry();
 }
 
@@ -175,18 +197,21 @@ bool IsNewBar()
 
 
 //+------------------------------------------------------------------+
-//| Daily Reset – resets the trade latch on a new server day          |
+//| Daily Reset – resets the trade latch when D1 bar changes         |
+//| Anchored on iTime(D1,0) – same source as the VWAP engine.        |
+//| This avoids any TZ drift between Italian time and broker time.   |
 //+------------------------------------------------------------------+
 void CheckDailyReset()
 {
-   MqlDateTime dt;
-   TimeCurrent(dt);
-
-   if(dt.day_of_year == m_currentTradeDay)
+   //--- Use the D1 bar open time as the canonical "new day" signal.
+   //    This is exactly what the VWAP engine uses as its anchor,
+   //    so both the latch and the VWAP stay in perfect sync.
+   datetime d1Open = iTime(_Symbol, PERIOD_D1, 0);
+   if(d1Open == 0 || d1Open == m_currentDayD1)
       return;
 
-   m_currentTradeDay  = dt.day_of_year;
-   m_tradeTakenToday  = false;
+   m_currentDayD1    = d1Open;
+   m_tradeTakenToday = false;
 
    //--- Clear position tracking only when no position is held over
    if(!FindOwnPosition())
@@ -199,7 +224,10 @@ void CheckDailyReset()
       m_entryTime     = 0;
    }
 
-   PrintFormat("=== New trading day %d.%02d.%02d ===", dt.year, dt.mon, dt.day);
+   MqlDateTime dt;
+   TimeToStruct(d1Open, dt);
+   PrintFormat("=== New trading day %d.%02d.%02d (D1 anchor: %s) ===",
+               dt.year, dt.mon, dt.day, TimeToString(d1Open));
 }
 
 
