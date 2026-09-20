@@ -66,8 +66,12 @@ The calculation engine must operate via a single-pass cumulative algorithm over 
 
 All conditions are evaluated on closed bars: `Bar 1` (just closed) and `Bar 2` (preceding closed bar).
 
+> [!NOTE]
+> **Pre-Session Breakout Parity:**
+> If the price is already outside the VWAP bands when the session opens at 15:30 Italian Time (e.g. breakout happened in Asian/European session or pre-market), there is NO requirement to wait for price to re-enter and break out again during the session. As soon as the price re-enters the band on a closed bar within the active session, the entry signal is immediately triggered.
+
 ### Long Setup (Mean Reversion from Lower Band)
-1. **Breakout Condition:** `Bar 2` close is strictly below Lower Band (`Close[2] < LowerBand[2]`).
+1. **Breakout / Outside Condition:** `Bar 2` close is strictly below Lower Band (`Close[2] < LowerBand[2]`).
 2. **Re-entry Condition:** `Bar 1` close is strictly above Lower Band (`Close[1] > LowerBand[1]`).
 3. **Execution:** Instant Market BUY at current `Ask` at the open of `Bar 0`.
 4. **Structural Stop Loss (SL):** Minimum between `Low[1]` and `Low[2]`, minus a small safety buffer (configurable points/spread).
