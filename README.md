@@ -63,22 +63,22 @@ $$\text{Lower Band} = \text{VWAP} - (1.5 \times \text{StdDev})$$
 
 ```mermaid
 flowchart TD
-    A[New M5 Bar Open] --> B{Within Trading Window?<br>15:30 - 22:00 IT}
-    B -- No --> End[Wait for Next Bar]
-    B -- Yes --> C{Already traded today?<br>Daily Latch == True}
+    A["New M5 Bar Open"] --> B{"Within Trading Window?<br>15:30 - 22:00 IT"}
+    B -- No --> End["Wait for Next Bar"]
+    B -- Yes --> C{"Already traded today?<br>Daily Latch == True"}
     C -- Yes --> End
-    C -- No --> D{Any position open?}
+    C -- No --> D{"Any position open?"}
     D -- Yes --> End
-    D -- No --> E[Calculate VWAP & Bands at Bar 1 & Bar 2]
+    D -- No --> E["Calculate VWAP & Bands at Bar 1 & Bar 2"]
     
-    E --> F{Long Setup?<br>Close[2] < LowerBand[2]<br>& Close[1] > LowerBand[1]}
-    F -- Yes --> G[Execute Instant BUY at Ask]
+    E --> F{"Long Setup?<br>Bar 2 Close &lt; Lower Band<br>and Bar 1 Close &gt; Lower Band"}
+    F -- Yes --> G["Execute Instant BUY at Ask"]
     
-    E --> H{Short Setup?<br>Close[2] > UpperBand[2]<br>& Close[1] < UpperBand[1]}
-    H -- Yes --> I[Execute Instant SELL at Bid]
+    E --> H{"Short Setup?<br>Bar 2 Close &gt; Upper Band<br>and Bar 1 Close &lt; Upper Band"}
+    H -- Yes --> I["Execute Instant SELL at Bid"]
     
-    G --> J[Set SL = min Low 1, 2 - Buffer<br>Set TP = Entry + 2 * Distance<br>Draw Visual Boxes]
-    I --> K[Set SL = max High 1, 2 + Buffer<br>Set TP = Entry - 2 * Distance<br>Draw Visual Boxes]
+    G --> J["Set SL = min(Low 1, 2) - Buffer<br>Set TP = Entry + 2 * Distance<br>Draw Visual Boxes"]
+    I --> K["Set SL = max(High 1, 2) + Buffer<br>Set TP = Entry - 2 * Distance<br>Draw Visual Boxes"]
 ```
 
 #### 🟢 Long Setup (Reversion from Lower Band)
